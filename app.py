@@ -44,7 +44,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-GRADIO_URL = st.secrets.get("GRADIO_URL", "https://8b8e4405b7bf7efeb2.gradio.live")
+GRADIO_URL = st.secrets.get("GRADIO_URL", "https://4ead2f5dc621281b10.gradio.live")
 
 if "queue" not in st.session_state:
     st.session_state.queue = []
@@ -187,26 +187,45 @@ def run_generation(job):
         # Never saw a status — give it extra time and hope for the best
         time.sleep(30)
 
-    # Try finalize_generation_with_state first (returns gallery directly)
-    try:
-        fin = client.predict(api_name="/finalize_generation_with_state")
-        gallery = fin[1] if isinstance(fin, (list, tuple)) and len(fin) > 1 else []
-        if isinstance(gallery, dict):
-            gallery = gallery.get("value", [])
-        if gallery:
-            path, url = extract_video(gallery)
-            if path or url:
-                return path, url, fin
-    except Exception:
-        pass
+    # Get the output timestamp/filename from finalize result
+    fin = client.predict(api_name="/finalize_generation_with_state")
 
-    # Fallback: refresh_gallery
-    gallery_result = client.predict(api_name="/refresh_gallery")
-    gallery = gallery_result[1] if isinstance(gallery_result, (list, tuple)) and len(gallery_result) > 1 else []
+    # fin[4] or fin[5] contains the output filename timestamp
+    output_ts = None
+    if isinstance(fin, (list, tuple)):
+        for item in fin:
+            if isinstance(item, str) and item.replace(".", "").isdigit() and len(item) > 5:
+                output_ts = item
+                break
+
+    # Try gallery first
+    gallery = fin[1] if isinstance(fin, (list, tuple)) and len(fin) > 1 else []
     if isinstance(gallery, dict):
         gallery = gallery.get("value", [])
-    path, url = extract_video(gallery)
-    return path, url, gallery_result
+    if gallery:
+        path, url = extract_video(gallery)
+        if path or url:
+            return path, url, fin
+
+    # Gallery is empty — try fetching file directly using the timestamp
+    # Gradio saves output as: outputs/<timestamp>.mp4 or tmp/<timestamp>.mp4
+    if output_ts:
+        for file_path in [
+            f"outputs/{output_ts}.mp4",
+            f"outputs/{output_ts}_audio.mp4",
+            f"tmp/{output_ts}.mp4",
+            f"{output_ts}.mp4",
+        ]:
+            url = f"{GRADIO_URL}/file={file_path}"
+            try:
+                import urllib.request
+                req = urllib.request.Request(url, method="HEAD")
+                urllib.request.urlopen(req, timeout=10)
+                return None, url, fin  # URL is valid!
+            except Exception:
+                pass
+
+    return None, None, fin
 
 
 # ── Queue rendering ───────────────────────────────────────────────────────────
