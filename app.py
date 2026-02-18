@@ -161,20 +161,50 @@ def run_generation(job):
     client.predict(api_name="/prepare_generate_video")
     client.predict(api_name="/init_process_queue_if_any")
 
-    # Poll until status clears (means generation finished)
-    for _ in range(120):  # max 10 min
+    # Phase 1: Wait until we see a non-empty status (generation started)
+    started = False
+    for _ in range(30):  # wait up to 2.5 min for it to start
         time.sleep(5)
         try:
-            status = str(client.predict(api_name="/refresh_status_async"))
-            if not status or status.strip() in ("", "null", "None"):
+            status = str(client.predict(api_name="/refresh_status_async")).strip()
+            if status and status not in ("null", "None", ""):
+                started = True
                 break
-            # If it contains a % progress it's still running, keep polling
         except Exception:
-            break
+            pass
 
-    # Fetch the gallery
+    # Phase 2: Keep polling until status goes empty again (generation done)
+    if started:
+        for _ in range(120):  # wait up to 10 min to finish
+            time.sleep(5)
+            try:
+                status = str(client.predict(api_name="/refresh_status_async")).strip()
+                if not status or status in ("null", "None", ""):
+                    break
+            except Exception:
+                break
+    else:
+        # Never saw a status — give it extra time and hope for the best
+        time.sleep(30)
+
+    # Try finalize_generation_with_state first (returns gallery directly)
+    try:
+        fin = client.predict(api_name="/finalize_generation_with_state")
+        gallery = fin[1] if isinstance(fin, (list, tuple)) and len(fin) > 1 else []
+        if isinstance(gallery, dict):
+            gallery = gallery.get("value", [])
+        if gallery:
+            path, url = extract_video(gallery)
+            if path or url:
+                return path, url, fin
+    except Exception:
+        pass
+
+    # Fallback: refresh_gallery
     gallery_result = client.predict(api_name="/refresh_gallery")
     gallery = gallery_result[1] if isinstance(gallery_result, (list, tuple)) and len(gallery_result) > 1 else []
+    if isinstance(gallery, dict):
+        gallery = gallery.get("value", [])
     path, url = extract_video(gallery)
     return path, url, gallery_result
 
@@ -242,7 +272,7 @@ for i, job in enumerate(st.session_state.queue):
                         job["error"] = f"Downloaded via URL (could not buffer): {dl_err}"
                 else:
                     job["status"] = "error"
-                    job["error"] = f"DEBUG: path={path} | url={url} | raw={raw}"
+                    job["error"] = f"path={path} | url={url} | gallery={raw[1] if isinstance(raw,(list,tuple)) and len(raw)>1 else raw}"
             except Exception as e:
                 job["status"] = "error"
                 job["error"] = str(e)
