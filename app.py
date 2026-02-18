@@ -298,7 +298,7 @@ if generate:
                 multi_prompts_gen_type=0,
                 multi_images_gen_type=0,
                 skip_steps_cache_type="",
-                skip_steps_multiplier="1.75",
+                skip_steps_multiplier=1.75,
                 skip_steps_start_step_perc=0,
                 loras_choices=[],
                 loras_multipliers="",
