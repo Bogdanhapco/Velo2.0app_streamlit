@@ -175,7 +175,8 @@ def run_generation(job):
     # Fetch the gallery
     gallery_result = client.predict(api_name="/refresh_gallery")
     gallery = gallery_result[1] if isinstance(gallery_result, (list, tuple)) and len(gallery_result) > 1 else []
-    return extract_video(gallery), gallery_result
+    path, url = extract_video(gallery)
+    return path, url, gallery_result
 
 
 # ── Queue rendering ───────────────────────────────────────────────────────────
