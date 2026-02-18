@@ -368,24 +368,35 @@ if generate:
                 api_name="/save_inputs_28",
             )
 
-            progress.progress(90, text="Processing output...")
-            time.sleep(0.5)
+
+            progress.progress(30, text="Preparing generation...")
+            client.predict(api_name="/prepare_generate_video")
+
+            progress.progress(40, text="Generating video (this may take a few minutes)...")
+            client.predict(api_name="/process_tasks")
+
+            progress.progress(85, text="Finalizing...")
+            final = client.predict(api_name="/finalize_generation")
+
             progress.progress(100, text="Done!")
 
-            # result is typically a filepath or dict
+            # final[1] is the gallery list of generated videos
             video_path = None
-            if isinstance(result, str) and os.path.exists(result):
-                video_path = result
-            elif isinstance(result, (list, tuple)):
-                for item in result:
-                    if isinstance(item, str) and os.path.exists(item):
-                        video_path = item
+            gallery = final[1] if isinstance(final, (list, tuple)) and len(final) > 1 else []
+            for item in gallery:
+                if isinstance(item, dict):
+                    v = item.get("video") or item.get("image", {})
+                    if isinstance(v, str) and os.path.exists(v):
+                        video_path = v
                         break
-                    if isinstance(item, dict):
-                        for v in item.values():
-                            if isinstance(v, str) and os.path.exists(v):
-                                video_path = v
-                                break
+                    if isinstance(v, dict):
+                        p = v.get("path") or v.get("url")
+                        if p and os.path.exists(p):
+                            video_path = p
+                            break
+                elif isinstance(item, str) and os.path.exists(item):
+                    video_path = item
+                    break
 
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
             st.markdown('<div class="card-label">🎬 Generated Video</div>', unsafe_allow_html=True)
@@ -401,8 +412,8 @@ if generate:
                     mime="video/mp4",
                 )
             else:
-                st.success("Generation complete! Check your Pinokio/LTX-Video output folder.")
-                st.code(str(result))
+                st.success("Generation complete!")
+                st.write("Raw result:", final)
 
         except Exception as e:
             progress.empty()
