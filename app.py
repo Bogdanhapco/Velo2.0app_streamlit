@@ -157,35 +157,31 @@ def run_generation(job):
         api_name="/save_inputs_28",
     )
 
-    # Kick off generation via queue
+    # Kick off generation — exact sequence matters!
     client.predict(api_name="/prepare_generate_video")
-    client.predict(api_name="/init_process_queue_if_any")
+    client.predict(api_name="/activate_status")   # THIS starts the generation engine
+    client.predict(api_name="/process_tasks")      # THIS runs the queue
 
-    # Phase 1: Wait until we see a non-empty status (generation started)
-    started = False
-    for _ in range(30):  # wait up to 2.5 min for it to start
+    # Wait for generation to start (up to 3 min)
+    time.sleep(10)  # give it time to spin up
+    for _ in range(36):
         time.sleep(5)
         try:
             status = str(client.predict(api_name="/refresh_status_async")).strip()
             if status and status not in ("null", "None", ""):
-                started = True
-                break
+                break  # generation started!
         except Exception:
             pass
 
-    # Phase 2: Keep polling until status goes empty again (generation done)
-    if started:
-        for _ in range(120):  # wait up to 10 min to finish
-            time.sleep(5)
-            try:
-                status = str(client.predict(api_name="/refresh_status_async")).strip()
-                if not status or status in ("null", "None", ""):
-                    break
-            except Exception:
-                break
-    else:
-        # Never saw a status — give it extra time and hope for the best
-        time.sleep(30)
+    # Wait for generation to finish (up to 15 min)
+    for _ in range(180):
+        time.sleep(5)
+        try:
+            status = str(client.predict(api_name="/refresh_status_async")).strip()
+            if not status or status in ("null", "None", ""):
+                break  # generation done!
+        except Exception:
+            break
 
     # Get the output timestamp/filename from finalize result
     fin = client.predict(api_name="/finalize_generation_with_state")
