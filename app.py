@@ -375,33 +375,40 @@ if generate:
             progress.progress(40, text="Generating video (this may take a few minutes)...")
             client.predict(api_name="/process_tasks")
 
-            progress.progress(85, text="Finalizing...")
-            final = client.predict(api_name="/finalize_generation")
+            progress.progress(85, text="Fetching generated video...")
+            gallery_result = client.predict(api_name="/refresh_gallery")
 
             progress.progress(100, text="Done!")
 
-            # final[1] is the gallery list of generated videos
+            # gallery_result[1] is the list of generated videos
             video_path = None
-            gallery = final[1] if isinstance(final, (list, tuple)) and len(final) > 1 else []
+            video_url = None
+            gallery = gallery_result[1] if isinstance(gallery_result, (list, tuple)) and len(gallery_result) > 1 else []
             for item in gallery:
                 if isinstance(item, dict):
-                    v = item.get("video") or item.get("image", {})
-                    if isinstance(v, str) and os.path.exists(v):
-                        video_path = v
-                        break
-                    if isinstance(v, dict):
-                        p = v.get("path") or v.get("url")
-                        if p and os.path.exists(p):
-                            video_path = p
+                    # Could be {"video": filepath} or {"image": {...}}
+                    v = item.get("video")
+                    if v:
+                        if isinstance(v, str):
+                            video_path = v
                             break
-                elif isinstance(item, str) and os.path.exists(item):
+                        elif isinstance(v, dict):
+                            p = v.get("path")
+                            u = v.get("url")
+                            if p and os.path.exists(p):
+                                video_path = p
+                                break
+                            elif u:
+                                video_url = u
+                                break
+                elif isinstance(item, str) and (item.endswith(".mp4") or os.path.exists(item)):
                     video_path = item
                     break
 
             st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
             st.markdown('<div class="card-label">🎬 Generated Video</div>', unsafe_allow_html=True)
 
-            if video_path:
+            if video_path and os.path.exists(video_path):
                 with open(video_path, "rb") as f:
                     video_bytes = f.read()
                 st.video(video_bytes)
@@ -411,9 +418,13 @@ if generate:
                     file_name="velo2_output.mp4",
                     mime="video/mp4",
                 )
+            elif video_url:
+                st.video(video_url)
+                st.markdown(f"[⬇ Download Video]({video_url})")
             else:
-                st.success("Generation complete!")
-                st.write("Raw result:", final)
+                st.success("Generation complete! Check your Pinokio output folder.")
+                st.write("Debug — gallery result:", gallery_result)
+
 
         except Exception as e:
             progress.empty()
