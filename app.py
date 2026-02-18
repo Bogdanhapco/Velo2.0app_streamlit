@@ -72,6 +72,7 @@ add_btn = st.button("⚡ ADD TO QUEUE & GENERATE")
 
 
 def extract_video(gallery):
+    """Extract video from gallery. Returns (local_path, remote_url)."""
     if not gallery:
         return None, None
     if isinstance(gallery, dict):
@@ -80,15 +81,28 @@ def extract_video(gallery):
         if isinstance(item, dict):
             v = item.get("video")
             if isinstance(v, str) and v:
-                return v, None
+                if v.startswith("http"):
+                    return None, v
+                if os.path.exists(v):
+                    return v, None
+                # Relative path from Gradio — build full URL
+                return None, GRADIO_URL + "/file=" + v
             if isinstance(v, dict):
-                p, u = v.get("path"), v.get("url")
+                p = v.get("path", "")
+                u = v.get("url", "")
                 if p and os.path.exists(p):
                     return p, None
-                if u:
+                if u and u.startswith("http"):
                     return None, u
-        elif isinstance(item, str) and ".mp4" in item:
-            return item, None
+                if p:
+                    return None, GRADIO_URL + "/file=" + p
+        elif isinstance(item, str) and item:
+            if item.startswith("http"):
+                return None, item
+            if os.path.exists(item):
+                return item, None
+            if "." in item:
+                return None, GRADIO_URL + "/file=" + item
     return None, None
 
 
@@ -161,7 +175,7 @@ def run_generation(job):
     # Fetch the gallery
     gallery_result = client.predict(api_name="/refresh_gallery")
     gallery = gallery_result[1] if isinstance(gallery_result, (list, tuple)) and len(gallery_result) > 1 else []
-    return extract_video(gallery)
+    return extract_video(gallery), gallery_result
 
 
 # ── Queue rendering ───────────────────────────────────────────────────────────
@@ -209,17 +223,25 @@ for i, job in enumerate(st.session_state.queue):
         job["status"] = "generating"
         with st.spinner(f"Generating: {job['prompt'][:50]}..."):
             try:
-                path, url = run_generation(job)
+                path, url, raw = run_generation(job)
                 if path and os.path.exists(path):
                     with open(path, "rb") as f:
                         job["video_bytes"] = f.read()
                     job["status"] = "done"
                 elif url:
-                    job["video_url"] = url
-                    job["status"] = "done"
+                    # Download the video from the Gradio URL into bytes
+                    import urllib.request
+                    try:
+                        with urllib.request.urlopen(url, timeout=60) as r:
+                            job["video_bytes"] = r.read()
+                        job["status"] = "done"
+                    except Exception as dl_err:
+                        job["video_url"] = url
+                        job["status"] = "done"
+                        job["error"] = f"Downloaded via URL (could not buffer): {dl_err}"
                 else:
                     job["status"] = "error"
-                    job["error"] = "No video returned. The generation may have completed on your PC — check the Pinokio output folder."
+                    job["error"] = f"DEBUG: path={path} | url={url} | raw={raw}"
             except Exception as e:
                 job["status"] = "error"
                 job["error"] = str(e)
